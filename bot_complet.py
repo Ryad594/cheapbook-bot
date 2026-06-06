@@ -53,7 +53,7 @@ async def on_member_join(member: discord.Member):
         color=discord.Color.from_rgb(201, 168, 76),
     )
     embed.set_footer(text="CHEAP BOOK · Réservation · Hébergement Premium")
-    await salon_start.send(content=member.mention, embed=embed, view=BoutonVerification(member_id=member.id))
+    await member.send(embed=embed, view=BoutonVerification(member_id=member.id))
 
 
 # ════════════════════════════════════════════════════════
