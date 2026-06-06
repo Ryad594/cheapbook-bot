@@ -4,12 +4,13 @@ from discord import app_commands
 import asyncio
 import os
 
-# ─── CONFIGURATION (via variables d'environnement Railway) ────
+# ─── CONFIGURATION ────────────────────────────────────
 TOKEN             = os.environ.get("TOKEN",             "")
 GUILD_ID          = int(os.environ.get("GUILD_ID",          "1512005220375334923"))
 TICKET_CHANNEL_ID = int(os.environ.get("TICKET_CHANNEL_ID", "1512010079711395921"))
 STAFF_ROLE_ID     = int(os.environ.get("STAFF_ROLE_ID",     "1512008401322770474"))
-# ──────────────────────────────────────────────────────────────
+LOGS_CHANNEL_NAME = "logs"
+# ──────────────────────────────────────────────────────
 
 intents = discord.Intents.default()
 intents.members = True
@@ -20,40 +21,40 @@ tree   = app_commands.CommandTree(client)
 
 # ════════════════════════════════════════════════════════
 #  ARRIVÉE D'UN NOUVEAU MEMBRE
+#  → Message dans #start visible que par lui
+#  → Log dans #logs pour le staff
 # ════════════════════════════════════════════════════════
 
 @client.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
+    # Donner le rôle "Non vérifié"
     role_non_verifie = discord.utils.get(guild.roles, name="🔒 Non vérifié")
     if role_non_verifie:
         await member.add_roles(role_non_verifie)
 
-    salon_start = None
+    # Log dans #logs pour le staff
+    salon_logs = None
     for ch in guild.channels:
-        if "start" in ch.name.lower() and isinstance(ch, discord.TextChannel):
-            salon_start = ch
+        if LOGS_CHANNEL_NAME in ch.name.lower() and isinstance(ch, discord.TextChannel):
+            salon_logs = ch
             break
+    if salon_logs:
+        embed_log = discord.Embed(
+            title="📥 Nouveau membre",
+            description=f"{member.mention} a rejoint le serveur.",
+            color=discord.Color.blue(),
+        )
+        embed_log.set_thumbnail(url=member.display_avatar.url)
+        embed_log.add_field(name="Nom", value=member.name, inline=True)
+        embed_log.add_field(name="ID", value=member.id, inline=True)
+        embed_log.set_footer(text=f"Membres total : {guild.member_count}")
+        await salon_logs.send(embed=embed_log)
 
-    if not salon_start:
-        return
-
-    embed = discord.Embed(
-        title=f"✈️ Bienvenue sur CHEAP BOOK, {member.display_name} !",
-        description=(
-            "Bienvenue sur le serveur de réservation d'hébergements **CHEAP BOOK** ! 🏨\n\n"
-            "Pour accéder à tous les salons, clique sur le bouton ci-dessous.\n\n"
-            "**Ce que tu trouveras ici :**\n"
-            "🛎️ Réservation d'hébergements via Booking\n"
-            "✈️ Agents d'escale disponibles\n"
-            "⭐ Avis clients vérifiés\n"
-            "🏆 Classements & récompenses"
-        ),
-        color=discord.Color.from_rgb(201, 168, 76),
-    )
-    embed.set_footer(text="CHEAP BOOK · Réservation · Hébergement Premium")
-    await member.send(embed=embed, view=BoutonVerification(member_id=member.id))
+    # Trouver #start et envoyer le panneau de vérification
+    # Le panneau permanent envoyé par /setup-verification suffit
+    # On n'envoie plus de message individuel pour éviter le spam
 
 
 # ════════════════════════════════════════════════════════
@@ -61,7 +62,7 @@ async def on_member_join(member: discord.Member):
 # ════════════════════════════════════════════════════════
 
 class BoutonVerification(View):
-    def __init__(self, member_id: int):
+    def __init__(self, member_id: int = 0):
         super().__init__(timeout=None)
         self.member_id = member_id
 
@@ -81,14 +82,34 @@ class BoutonVerification(View):
             await interaction.response.send_message("❌ Rôle introuvable. Contacte un admin.", ephemeral=True)
             return
 
+        # Déjà vérifié
+        if role_verifie in member.roles:
+            await interaction.response.send_message("✅ Tu es déjà vérifié !", ephemeral=True)
+            return
+
         if role_non_verifie and role_non_verifie in member.roles:
             await member.remove_roles(role_non_verifie)
         await member.add_roles(role_verifie)
 
         await interaction.response.send_message(
-            "✅ Tu es maintenant vérifié ! Bienvenue sur **CHEAP BOOK** 🏨✈️",
+            "✅ Tu es maintenant vérifié ! Bienvenue sur **CHEAP BOOK** 🏨✈️\nTu as maintenant accès à tous les salons.",
             ephemeral=True,
         )
+
+        # Log la vérification dans #logs
+        salon_logs = None
+        for ch in guild.channels:
+            if LOGS_CHANNEL_NAME in ch.name.lower() and isinstance(ch, discord.TextChannel):
+                salon_logs = ch
+                break
+        if salon_logs:
+            await salon_logs.send(
+                embed=discord.Embed(
+                    title="✅ Membre vérifié",
+                    description=f"{member.mention} vient de se vérifier.",
+                    color=discord.Color.green(),
+                )
+            )
 
 
 # ════════════════════════════════════════════════════════
@@ -96,11 +117,10 @@ class BoutonVerification(View):
 # ════════════════════════════════════════════════════════
 
 class FormulaireReservation(Modal, title="🏨 Nouvelle Réservation Booking"):
-
-    nom_hotel = TextInput(label="Nom de l'hôtel", placeholder="Ex : Marriott Paris Champs-Élysées", required=True, max_length=100)
-    ville = TextInput(label="Ville de l'hôtel", placeholder="Ex : Paris, Lyon, Barcelone...", required=True, max_length=100)
-    date_reservation = TextInput(label="Date de réservation", placeholder="Ex : 15/07/2025 → 20/07/2025", required=True, max_length=100)
-    prix = TextInput(label="Prix total (en €)", placeholder="Ex : 350€", required=True, max_length=50)
+    nom_hotel        = TextInput(label="Nom de l'hôtel",       placeholder="Ex : Marriott Paris Champs-Élysées", required=True, max_length=100)
+    ville            = TextInput(label="Ville de l'hôtel",     placeholder="Ex : Paris, Lyon, Barcelone...",     required=True, max_length=100)
+    date_reservation = TextInput(label="Date de réservation",  placeholder="Ex : 15/07/2025 → 20/07/2025",      required=True, max_length=100)
+    prix             = TextInput(label="Prix total (en €)",    placeholder="Ex : 350€",                         required=True, max_length=50)
 
     async def on_submit(self, interaction: discord.Interaction):
         guild      = interaction.guild
@@ -247,7 +267,15 @@ async def setup_verification(interaction: discord.Interaction):
         return
     embed = discord.Embed(
         title="✈️ Bienvenue sur CHEAP BOOK !",
-        description="Pour accéder à tous les salons, clique sur le bouton ci-dessous.\n\n**Ce que tu trouveras ici :**\n🛎️ Réservation d'hébergements\n✈️ Agents d'escale disponibles\n⭐ Avis clients vérifiés\n🏆 Classements & récompenses\n\n*La vérification est instantanée et gratuite.*",
+        description=(
+            "Pour accéder à tous les salons, clique sur le bouton ci-dessous. 👇\n\n"
+            "**Ce que tu trouveras ici :**\n"
+            "🛎️ Réservation d'hébergements via Booking\n"
+            "✈️ Agents d'escale disponibles\n"
+            "⭐ Avis clients vérifiés\n"
+            "🏆 Classements & récompenses\n\n"
+            "*La vérification est instantanée et gratuite.*"
+        ),
         color=discord.Color.from_rgb(201, 168, 76),
     )
     embed.set_footer(text="CHEAP BOOK · Réservation · Hébergement Premium")
